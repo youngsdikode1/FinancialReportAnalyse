@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+# 虚拟环境
+venv/
+.venv/
+env/
+config.json
+
+
+# 日志文件（你的项目会生成 *.log）
+*.log
+
+# IDE配置
+.vscode/
+.idea/
+
+# 密钥环境文件
+.env
+.env.local
+
+# linux垃圾文件
+*.swp
+*~
+
+# 临时备份
+*_old.py
