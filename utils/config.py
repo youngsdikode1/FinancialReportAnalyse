@@ -104,3 +104,6 @@ class CConfigManager:
         """
         base_data = self.GetDataDir()
         return os.path.join(base_data, "company", stock_code, "reports")
+
+    def GetDatasinkingKey(self):
+        return self.m_configs["datasinking_key"]     

@@ -12,15 +12,18 @@ from users.user_manager import CUserManager
 from users.user import CUser
 from users.message import CMessage, CMessageType
 from utils.logs import LogStack, LogInfo
+from utils.config import CConfigManager
+from monitor_manager import CMonitorManager
+from pathlib import Path
+from fastapi.responses import FileResponse
+import version
+
 
 app = FastAPI()
-UPLOAD_DIR = "./files"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Ollama配置
-OLLAMA_BASE_URL = "http://192.168.1.25:11434/v1/chat/completions"
-MODEL_NAME = "qwen2.5:7b"
+
 USE_STREAM = True
 
 def calc_file_md5(file_bytes: bytes) -> str:
@@ -28,169 +31,42 @@ def calc_file_md5(file_bytes: bytes) -> str:
     m.update(file_bytes)
     return m.hexdigest()
 
-"""
-# ===================== 流式版本Agent =====================
-def agent_worker_stream(session_id: str, user_query: str, web_socket: WebSocket):
-    user_mgr = CUserManager()
-    c_user = user_mgr.LoadUser(session_id)
 
-    log_msg_start = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="✅收到用户请求，启动【流式Agent】",
-        m_color="#dddd22"
-    )
-    c_user.AddChatMessage(log_msg_start, ignore_web_socket=None)
-
-    log_msg_ollama = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="🧠调用Ollama qwen2.5:7b 流式推理",
-        m_color="#dddd22"
-    )
-    c_user.AddChatMessage(log_msg_ollama, ignore_web_socket=None)
-
-    req_payload = {
-        "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": user_query}],
-        "stream": True
-    }
-    resp = requests.post(OLLAMA_BASE_URL, json=req_payload, stream=True, timeout=120)
-    if resp.status_code != 200:
-        log_msg_err = CMessage(
-            m_type=CMessageType.TYPE_CHAT_MONITOR,
-            m_content=f"❌Ollama请求失败，code={resp.status_code}",
-            m_color="#ff4444"
-        )
-        c_user.AddChatMessage(log_msg_err, ignore_web_socket=None)
-        return
-
-    full_answer = ""
-    for line in resp.iter_lines():
-        if not line:
-            continue
-        raw = line.decode("utf-8").strip()
-        if raw.startswith("data: "):
-            data = raw[6:]
-            if data == "[DONE]":
-                break
-            import json
-            try:
-                j = json.loads(data)
-                delta = j["choices"][0]["delta"].get("content", "")
-                if delta:
-                    full_answer += delta
-                    c_user.PushStreamChatChunk(web_socket, delta)
-            except Exception:
-                continue
-
-    c_user.PushStreamChatEnd(web_socket)
-
-    bot_msg = CMessage(
-        m_type=CMessageType.TYPE_CHAT_BOT,
-        m_content=full_answer,
-        m_color="#2288ff"
-    )
-    c_user.AddChatMessage(bot_msg, ignore_web_socket=web_socket)
-
-    log_msg_done = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="🏁【流式】LLM输出完成",
-        m_color="#33cc33"
-    )
-    c_user.AddChatMessage(log_msg_done, ignore_web_socket=None)
-
-
-# ===================== 一次性全量输出Agent =====================
-def agent_worker_complete(session_id: str, user_query: str, web_socket: WebSocket):
-    user_mgr = CUserManager()
-    c_user = user_mgr.LoadUser(session_id)
-
-    log_msg_start = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="✅收到用户请求，启动【一次性全量Agent】",
-        m_color="#dddd22"
-    )
-    c_user.AddChatMessage(log_msg_start, ignore_web_socket=None)
-
-    log_msg_ollama = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="🧠调用Ollama qwen2.5:7b，等待完整结果",
-        m_color="#dddd22"
-    )
-    c_user.AddChatMessage(log_msg_ollama, ignore_web_socket=None)
-
-    req_payload = {
-        "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": user_query}],
-        "stream": False
-    }
-    resp = requests.post(OLLAMA_BASE_URL, json=req_payload, timeout=120)
-    if resp.status_code != 200:
-        log_msg_err = CMessage(
-            m_type=CMessageType.TYPE_CHAT_MONITOR,
-            m_content=f"❌Ollama请求失败，code={resp.status_code}",
-            m_color="#ff4444"
-        )
-        c_user.AddChatMessage(log_msg_err, ignore_web_socket=None)
-        return
-
-    import json
-    j = resp.json()
-    full_answer = j["choices"][0]["message"]["content"]
-
-    bot_msg = CMessage(
-        m_type=CMessageType.TYPE_CHAT_BOT,
-        m_content=full_answer,
-        m_color="#2288ff"
-    )
-    c_user.AddChatMessage(bot_msg, ignore_web_socket=web_socket)
-
-    log_msg_done = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content="🏁【一次性】LLM输出完成",
-        m_color="#33cc33"
-    )
-    c_user.AddChatMessage(log_msg_done, ignore_web_socket=None)
-
-"""
 
 # ===================== 文件后台任务 =====================
 def upload_background_task(session_id: str, orig_filename: str, file_bytes: bytes):
     user_mgr = CUserManager()
     c_user = user_mgr.LoadUser(session_id)
+    c_user.AddMonitorMessage(f"📂后台线程开始处理文件：{orig_filename}")
 
-    log_msg_begin = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content=f"📂后台线程开始处理文件：{orig_filename}",
-        m_color="#dddd22"
-    )
-    c_user.AddChatMessage(log_msg_begin, ignore_web_socket=None)
+    upload_dir = CConfigManager.GetInstance().GetDataDir()
+    upload_dir += "/uploads/"
+    os.makedirs(upload_dir, exist_ok=True)
 
     md5_hash = calc_file_md5(file_bytes)
     md5_name = f"{md5_hash}.pdf"
-    save_path = os.path.join(UPLOAD_DIR, md5_name)
+    save_path = os.path.join(upload_dir, md5_name)
     if not os.path.exists(save_path):
         with open(save_path, "wb") as f:
             f.write(file_bytes)
-        log_msg_write_ok = CMessage(
-            m_type=CMessageType.TYPE_CHAT_MONITOR,
-            m_content=f"✅文件写入成功，md5={md5_hash}",
-            m_color="#33cc33"
-        )
-        c_user.AddChatMessage(log_msg_write_ok, ignore_web_socket=None)
-    else:
-        log_msg_exist = CMessage(
-            m_type=CMessageType.TYPE_CHAT_MONITOR,
-            m_content=f"ℹ️文件已存在，复用md5={md5_hash}",
-            m_color="#dddd22"
-        )
-        c_user.AddChatMessage(log_msg_exist, ignore_web_socket=None)
 
-    log_msg_finish = CMessage(
-        m_type=CMessageType.TYPE_CHAT_MONITOR,
-        m_content=f"📄【{orig_filename}】上传任务全部完成",
-        m_color="#33cc33"
+        c_user.AddMonitorMessage(f"✅文件{orig_filename}写入成功")
+    else:
+
+        c_user.AddMonitorMessage(f"ℹ️文件已存在")
+
+    c_user.AddMonitorMessage(f"📄【{orig_filename}】保存完成，开始解析PDF财报")
+
+    # 发布用户上传PDF事件，content传递pdf磁盘完整路径
+    from events.event import CEventMessage, CEventType
+    from events.event_manager import CEventManager
+    event_msg = CEventMessage(
+        msg_type=CEventType.TYPE_USER_UPLOAD,
+        session_id=session_id,
+        content=save_path,
     )
-    c_user.AddChatMessage(log_msg_finish, ignore_web_socket=None)
+    evt_mgr = CEventManager.GetInstance()
+    evt_mgr.Publish(event_msg)
 
 # ===================== 外部消息处理函数 =====================
 async def handle_incoming_message(raw_msg: dict, sid: str, web_socket: WebSocket):
@@ -199,40 +75,7 @@ async def handle_incoming_message(raw_msg: dict, sid: str, web_socket: WebSocket
     socket_group = c_user.GetWebSocketGroup()
     socket_group.OnReciveJson(web_socket, raw_msg)
 
-    """
-    msg_type = raw_msg.get("type")
 
-    if msg_type == "load_history":
-        LogInfo(f"handle_incoming_message 收到load_history请求, sid={sid} "
-                f"chat_history_size={len(c_user.m_chat_history)} "
-                f"monitor_history_size={len(c_user.m_monitor_history)}")
-        # 已改为普通同步方法，移除 await
-        c_user.RefreshChatUI()
-        c_user.RefreshMonitorUI()
-        return
-
-
-    if msg_type == "query":
-        user_text = raw_msg["query"]
-        LogInfo(f"handle_incoming_message 收到用户query sid={sid}, user_text={user_text}")
-        user_msg = CMessage(
-            m_type=CMessageType.TYPE_CHAT_USER,
-            m_content=user_text,
-            m_color="#e7f3ff"
-        )
-        c_user.AddChatMessage(user_msg, ignore_web_socket=web_socket)
-
-        if USE_STREAM:
-            target_func = agent_worker_stream
-        else:
-            target_func = agent_worker_complete
-        t = threading.Thread(
-            target=target_func,
-            args=(sid, user_text, web_socket),
-            daemon=True
-        )
-        t.start()
-    """
 
 @app.get("/")
 async def index():
@@ -282,7 +125,7 @@ async def upload_file(
     file: UploadFile = None
 ):
     user_mgr = CUserManager()
-    c_user = user_mgr.LoadUser(session_id)
+
     LogInfo(f"upload_file 收到上传请求 session_id={session_id}, filename={file.filename if file else None}")
     if not file:
         return {"ok": False, "msg": "未选择文件"}
@@ -298,6 +141,58 @@ async def upload_file(
     t.start()
     return {"ok": True, "msg": "文件已接收，后台正在处理，请查看右侧状态栏"}
 
+@app.get("/api/get_intro")
+async def api_get_intro():
+    from utils.prompt_manager import CPromptManager
+    text = CPromptManager().IntroMyself()
+    text += CPromptManager().GetExampleDesc()
+    text += CPromptManager().GetSourceIntro()
+
+    return {"intro_markdown": text}
+
+
+@app.get("/api/monitor_info")
+async def api_monitor_info():
+    mgr = CMonitorManager.GetInstance()
+    return {
+        "user_info": mgr.GetUserInfo(),
+        "rag_info": mgr.GetRAGInfo(),
+        "hardware_info": mgr.GetHardwareInfo()
+    }
+
+#http://172.18.132.109:8000/monitor 
+@app.get("/monitor")
+async def redirect_monitor():
+    return RedirectResponse(url="/static/monitor.html")
+
+
+
+@app.get("/download_source")
+async def download_source():
+
+
+    cfg = CConfigManager.GetInstance()
+    data_dir = cfg.GetDataDir()
+    source_path = data_dir + "/source_code/" + "FinancialReportAnalyse.tar.gz"
+
+    if not os.path.exists(source_path):
+        LogInfo(f"download_source file not exist")
+
+        return {"ok": False, "msg": "源码包不存在"}
+
+
+    LogInfo(f"download_source file")
+
+    return FileResponse(
+        path=source_path,
+        filename="FinancialReportAnalyse-src.tar.gz",
+        media_type="application/zip"
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
+
+
+    LogInfo(f"finacial seek, vesion {version.GetVersion()}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -4,7 +4,9 @@ from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from utils.config import CConfigManager
 from langchain_deepseek import ChatDeepSeek
-
+import json
+import utils.commons
+from datetime import datetime
 
 # ====================== 工具函数 ======================
 def EstimateTokenCount(text: str) -> int:
@@ -73,49 +75,82 @@ class CLLMRequest:
         self.m_bDebugLog = enable
 
     def Invoke(self, prompt: str, temp_params: Optional[dict] = None) -> str:
+
+
+        if CConfigManager.GetInstance().GetValue("use_deepseek_only"):
+            self.SWitchToDeepseekModel()
+
+        dt = datetime.now()
+        s_datetime = dt.strftime("%Y-%m-%d %H:%M:%S")
+
         llm = self.m_llm
         if temp_params is not None:
             llm = llm.with_config(temp_params)
         input_tokens = EstimateTokenCount(prompt)
+
+
+        LLMRequestLog(f"\n********************* [CLLMRequest DebugLog] *********************")
+        caller = utils.commons.GetCaller().function
+        LLMRequestLog(s_datetime)            
+        LLMRequestLog(f"caller: {caller}")
+        LLMRequestLog(f"Model: {self.m_modelName}")
+        LLMRequestLog(f"Input estimated token: {input_tokens}")
+        LLMRequestLog(f"Prompt:\n{prompt}\n")   
+
         resp = llm.invoke(prompt)
         output_text = resp.content
         output_tokens = EstimateTokenCount(output_text)
-        if self.m_bDebugLog:
-            LLMRequestLog(f"\n----------------------- [CLLMRequest DebugLog] -----------------------")
-            caller = "Demo"
-            LLMRequestLog(f"caller: {caller}")
-            LLMRequestLog(f"Model: {self.m_modelName}")
-            LLMRequestLog(f"Input estimated token: {input_tokens}")
-            LLMRequestLog(f"Output estimated token: {output_tokens}")
-            LLMRequestLog(f"Prompt:\n{prompt}\n")
-            LLMRequestLog(f"Response:\n{output_text}\n")
-            LLMRequestLog("---------------------------------------------------------------------\n")
+
+        LLMRequestLog("\n--------------------------------------\n")    
+        LLMRequestLog(f"Output estimated token: {output_tokens}")
+        LLMRequestLog(f"Response:\n{output_text}\n")
+        LLMRequestLog("********************************************************************\n")
         return output_text
 
     def InvokeStructured(self, prompt: str, schema_cls: type[BaseModel], temp_params: Optional[dict] = None) -> Any:
+
+        if CConfigManager.GetInstance().GetValue("use_deepseek_only"):
+            self.SWitchToDeepseekModel()
+
+
         structured_llm = self.m_llm.with_structured_output(schema_cls)
         if temp_params is not None:
             structured_llm = structured_llm.with_config(temp_params)
         input_tokens = EstimateTokenCount(prompt)
+
+        dt = datetime.now()
+        s_datetime = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        LLMRequestLog(f"\n********************* [CLLMRequest Structured DebugLog] *********************")
+        caller = utils.commons.GetCaller().function
+        LLMRequestLog(s_datetime)                       
+        LLMRequestLog(f"caller: {caller}")
+        LLMRequestLog(f"Model: {self.m_modelName}")
+        LLMRequestLog(f"Input estimated token: {input_tokens}")        
+        LLMRequestLog(f"Prompt:\n{prompt}\n")
+
+
         result = structured_llm.invoke(prompt)
         output_json_str = result.model_dump_json()
         output_tokens = EstimateTokenCount(output_json_str)
-        if self.m_bDebugLog:
-            LLMRequestLog(f"\n----------------------- [CLLMRequest Structured DebugLog] -----------------------")
-            caller = "Demo"
-            LLMRequestLog(f"caller: {caller}")
-            LLMRequestLog(f"Model: {self.m_modelName}")
-            LLMRequestLog(f"Input estimated token: {input_tokens}")
-            LLMRequestLog(f"Output estimated token: {output_tokens}")
-            LLMRequestLog(f"Prompt:\n{prompt}\n")
-            LLMRequestLog(f"Structured Result JSON:\n{output_json_str}\n")
-            LLMRequestLog("----------------------------------------------\n")
+
+        pretty_json_str = utils.commons.PrettyJson(output_json_str)
+
+        LLMRequestLog("\n--------------------------------------\n")
+        LLMRequestLog(f"Output estimated token: {output_tokens}")
+        if pretty_json_str:
+            LLMRequestLog(f"Structured Result JSON:\n{pretty_json_str}\n")
+        else:
+            LLMRequestLog(f"Structured Result JSON:\n{output_json_str}\n")     
+                        
+        LLMRequestLog("********************************************************************\n")
+
         return result
 
 
 def DemoTestDeepSeek():
     """
-    Demo：测试DeepSeek‑Flash连通性，放在llm_request.py，直接运行本文件即可测试
+    Demo：测试DeepSeek-Flash连通性，放在llm_request.py，直接运行本文件即可测试
     1. 普通文本调用
     2. 结构化输出调用（模拟财报解析pydantic结构化）
     """

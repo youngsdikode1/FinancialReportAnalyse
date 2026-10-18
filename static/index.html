@@ -2,238 +2,145 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>财报Agent演示</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>财报分析Agent</title>
+    <!-- 第三方CDN依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.2/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/python.min.js">
+    </script>
+    <!-- 引入独立样式表 -->
+    <link rel="stylesheet" href="./style.css">
+    <!-- 浏览器 tab 图标：善财童子 水纹 -->
+    <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="%23446AF4" /><path d="M10 32 C18 24 26 40 32 32 C38 24 46 40 54 32" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" /><path d="M10 44 C18 36 26 52 32 44 C38 36 46 52 54 44" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" /></svg>'>
     <style>
-*{box-sizing:border-box;font-family:system-ui}
-body{margin:16px;}
-.container{display:flex;gap:16px;max-width:1300px;}
-.left{width:65%;}
-.right{width:35%;display:flex;flex-direction:column;}
-.tab-buttons{display:flex;gap:4px;margin-bottom:10px;}
-.tab-btn{padding:8px 14px;border:1px solid #aaa;background:#eee;cursor:pointer;}
-.tab-btn.active{background:#2266cc;color:white;border-color:#2266cc;}
-.tab-panel{display:none;}
-.tab-panel.active{display:block;}
-#chatArea{height:460px;border:1px solid #ccc;padding:10px;overflow-y:auto;}
-.msg-user{background:#e7f3ff;padding:8px 10px;margin:4px 0;border-radius:6px;}
-.msg-bot{background:#f5f5f5;padding:8px 10px;margin:4px 0;border-radius:6px;}
-#chatInput{width:100%;height:80px;padding:8px;margin-top:8px;}
-.chat-btn-row{display:flex;gap:8px;margin-top:6px;}
-.upload-box{padding:10px;}
-#fileList{margin-top:12px;}
-.file-item{padding:4px 0;}
-.intro-text{padding:10px;line-height:1.6}
-.debug-box{padding:10px;line-height:1.8;}
-#logPanel{height:540px;border:1px solid #ccc;padding:10px;overflow-y:auto;white-space:pre-wrap;}
+        .upload-guide-block {
+            background-color: #f7f8fa;
+            padding:14px 16px;
+            border-radius: 8px;
+            margin-bottom:20px;
+            line-height:1.65;
+        }
+        .upload-guide-block h4 {
+            margin-top:0;
+            margin-bottom:8px;
+        }
+        .guide-text p {
+            margin:6px 0;
+        }
+        .download-hint {
+            margin-top:12px;
+            padding-top:10px;
+            border-top:1px solid #e5e7eb;
+        }
+        .download-hint a {
+            color:#2563eb;
+            text-decoration:underline;
+        }
+        .upload-form-area {
+            display:flex;
+            gap:12px;
+            align-items:center;
+            flex-wrap:wrap;
+        }
+        .tip-msg {
+            width:100%;
+            margin-top:8px;
+            font-size:13px;
+            color:#666;
+        }
     </style>
 </head>
 <body>
-<h2>财报分析Agent演示</h2>
-<div class="container">
-    <div class="left">
-        <div class="tab-buttons">
-            <button class="tab-btn active" data-tab="tab-chat">聊天界面</button>
-            <button class="tab-btn" data-tab="tab-intro">产品介绍</button>
-            <button class="tab-btn" data-tab="tab-upload">文件上传</button>
-            <!-- 新增调试tab按钮 -->
-            <button class="tab-btn" data-tab="tab-debug">调试</button>
-        </div>
-        <div id="tab-chat" class="tab-panel active">
-            <div id="chatArea"></div>
-            <textarea id="chatInput" placeholder="输入你的问题"></textarea>
-            <div class="chat-btn-row">
-                <button id="btnSend">发送消息</button>
-            </div>
-        </div>
-        <div id="tab-intro" class="tab-panel">
-            <div class="intro-text">
-                <h3>财报智能分析Agent</h3>
-                <p>架构：FastAPI + WebSocket + User会话层</p>
-                <p>刷新页面自动加载历史会话消息。</p>
-            </div>
-        </div>
-        <div id="tab-upload" class="tab-panel">
-            <div class="upload-box">
-                <input type="file" id="fileInput" accept=".pdf">
-                <button id="btnUpload">上传PDF</button>
-                <div id="fileList"><b>上传状态查看：右侧状态栏查看后台任务进度</b></div>
-            </div>
-        </div>
-        <!-- 新增调试面板 -->
-        <div id="tab-debug" class="tab-panel">
-            <div class="debug-box">
-                <h4>调试工具</h4>
-                <p>当前本地sessionId：<span id="showLocalSid">-</span></p>
-                <button id="btnClearSession">清除前端sessionId，重置会话</button>
-                <p style="font-size:12px;color:#666">说明：仅清除浏览器本地存储，后端旧会话不会自动删除；点击后页面自动刷新生成全新会话</p>
-            </div>
-        </div>
+<div class="page-wrap">
+    <!-- 全局Tab按钮栏 已移除h2标题 -->
+    <div class="tab-buttons">
+        <button class="tab-btn active" data-tab="tab-chat">财报问答</button>
+        <button class="tab-btn" data-tab="tab-intro">产品介绍</button>
+        <button class="tab-btn" data-tab="tab-upload">财报上传</button>
+        <!-- 新增：清空聊天记录按钮 -->
+        <button class="tab-btn" id="btnClearChat">清空聊天记录</button>
+        <button class="tab-btn" data-tab="tab-debug">调试</button>
+        <!-- 善财童子，放在控件组最右侧（css设置display:none隐藏） -->
+        <span class="brand-text">善财</span>
     </div>
-    <div class="right">
-        <h4>🔍Agent实时进度状态栏</h4>
-        <div id="logPanel"></div>
+    <div class="container">
+        <div class="left">
+            <div id="tab-chat" class="tab-panel active">
+                <div id="chatArea"></div>
+                <div class="input-wrap" id="inputWrap">
+                    <textarea id="chatInput" placeholder="输入你的问题"></textarea>
+                    <div class="input-bottom-bar">
+                        <div></div>
+                        <button id="btnSend">↑</button>
+                    </div>
+                </div>
+            </div>
+            <div id="tab-intro" class="tab-panel">
+                <div class="intro-text">
+                    <h3>善财</h3>
+                    <div id="intro-content"></div>
+                </div>
+            </div>
+            <div id="tab-upload" class="tab-panel">
+                <div class="upload-box">
+                    <div class="upload-guide-block">
+                        <h4>📄财报PDF手动上传</h4>
+                        <div class="guide-text">
+                            <p>财报问答一般情况下系统会自动识别需要的财报材料及自动下载<br>
+                            但是如果部分财报出现下载不了的情况，才使用这个页面进行上传</p>
+                            <div class="download-hint">
+                                <p><strong>PDF财报下载方式</strong></p>
+                                <p>1.巨潮网<br>
+                                <a target="_blank" href="https://www.cninfo.com.cn/">https://www.cninfo.com.cn/</a><br>
+                                打开以上链接，搜索对应股票，点击对应的财报发布公告，点开后看到PDF页面后，浏览器右键另存为到本地
+                                </p>
+                                <br>
+                                <p>2.东方财富网<br>
+                                <a target="_blank" href="https://data.eastmoney.com">https://data.eastmoney.com</a><br>
+                                打开以上链接，搜索对应股票，进入网页后，点击 [查看PDF原文] ，点开后看到PDF页面后，浏览器右键另存为到本地
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="upload-form-area">
+                        <input type="file" id="fileInput" accept=".pdf" />
+                        <!-- 使用tab-btn样式，和顶部tab按钮、聊天体系按钮风格统一 -->
+                        <button id="btnUpload" class="tab-btn">上传PDF</button>
+                        <div id="fileList" class="tip-msg"><b>上传状态查看：右侧状态栏查看后台任务进度</b></div>
+                    </div>
+                </div>
+            </div>
+            <div id="tab-debug" class="tab-panel">
+                <div class="debug-box">
+                    <h4>调试工具</h4>
+                    <p>当前本地sessionId：<span id="showLocalSid">-</span></p>
+                    <button id="btnClearSession" class="tab-btn">清除前端sessionId，重置会话</button>
+                    <p style="font-size:12px;color:#666">说明：仅清除浏览器本地存储，后端旧会话不会自动删除；点击后页面自动刷新生成全新会话</p>
+                </div>
+            </div>
+        </div>
+        <div class="right">
+            <div id="logPanel"></div>
+        </div>
     </div>
 </div>
+<!-- 外部JS，放在body末尾 -->
+<script src="./main.js"></script>
 <script>
-let ws = null;
-let sessionId = null;
-let currentBotDiv = null;
-const chatArea = document.getElementById("chatArea");
-const logPanel = document.getElementById("logPanel");
-const chatInput = document.getElementById("chatInput");
-const tabBtns = document.querySelectorAll(".tab-btn");
-const panels = document.querySelectorAll(".tab-panel");
-const showLocalSid = document.getElementById("showLocalSid");
-
-// tab切换
-tabBtns.forEach(btn=>{
-    btn.onclick = ()=>{
-        const targetTab = btn.dataset.tab;
-        tabBtns.forEach(b=>b.classList.remove("active"));
-        panels.forEach(p=>p.classList.remove("active"));
-        btn.classList.add("active");
-        document.getElementById(targetTab).classList.add("active");
-        // 切换到调试tab时，刷新显示当前本地sid
-        if(targetTab === "tab-debug"){
-            showLocalSid.innerText = localStorage.getItem("agent_session_id") || "无(未存储)";
-        }
+//页面加载完成，获取产品介绍markdown并渲染
+document.addEventListener('DOMContentLoaded', async ()=>{
+    try{
+        const resp = await fetch("/api/get_intro");
+        const json = await resp.json();
+        const mdText = json.intro_markdown;
+        const html = marked.parse(mdText);
+        document.querySelector("#intro-content").innerHTML = html;
+    }catch(e){
+        console.error("加载产品介绍失败",e);
     }
 })
-
-function renderChatAll(list){
-    if(!list || list.length === 0){
-        return;
-    }
-    currentBotDiv = null;
-    chatArea.innerHTML = "";
-    list.forEach(item=>{
-        const div = document.createElement("div");
-        if(item.m_type === "TYPE_CHAT_USER"){
-            div.className = "msg-user";
-        }else if(item.m_type === "TYPE_CHAT_BOT"){
-            div.className = "msg-bot";
-        }
-        div.innerText = item.m_content;
-        chatArea.appendChild(div);
-    })
-    chatArea.scrollTop = chatArea.scrollHeight;
-}
-
-function renderMonitorAll(list){
-    if(!list || list.length === 0){
-        return;
-    }
-    logPanel.innerText = "";
-    list.forEach(item=>{
-        logPanel.innerText += item.m_content + "\n";
-    })
-    logPanel.scrollTop = logPanel.scrollHeight;
-}
-
-function connectWs(){
-    const savedSid = localStorage.getItem("agent_session_id");
-    let wsUrl;
-    const proto = location.protocol==='https:'?'wss:':'ws:';
-    if(savedSid){
-        wsUrl = `${proto}//${location.host}/ws?sid=${savedSid}`;
-    }else{
-        wsUrl = `${proto}//${location.host}/ws`;
-    }
-    ws = new WebSocket(wsUrl);
-    ws.onopen = ()=> {
-        logPanel.innerText += "✅WebSocket已连接\n";
-    };
-    ws.onmessage = (ev)=>{
-        const data = JSON.parse(ev.data);
-        console.log("ws收到数据包：", data);
-        if(data.type === "init"){
-            sessionId = data.session_id;
-            localStorage.setItem("agent_session_id", sessionId);
-            logPanel.innerText += "🆔会话ID："+sessionId.substring(0,12)+"...\n";
-            ws.send(JSON.stringify({"type":"load_history"}));
-        }
-        else if(data.type === "chat_chunk"){
-            if(currentBotDiv === null){
-                currentBotDiv = document.createElement("div");
-                currentBotDiv.className = "msg-bot";
-                chatArea.appendChild(currentBotDiv);
-            }
-            currentBotDiv.innerText += data.text;
-            chatArea.scrollTop = chatArea.scrollHeight;
-        }
-        else if(data.type === "chat_end"){
-            currentBotDiv = null;
-        }
-        // 单条追加消息（跨tab同步）
-        else if(data.msg_type === "append_msg"){
-            const item = data.item;
-            if(item.m_type === "TYPE_CHAT_MONITOR"){
-                logPanel.innerText += item.m_content + "\n";
-                logPanel.scrollTop = logPanel.scrollHeight;
-                return;
-            }
-            const div = document.createElement("div");
-            if(item.m_type === "TYPE_CHAT_USER"){
-                div.className = "msg-user";
-            }else if(item.m_type === "TYPE_CHAT_BOT"){
-                div.className = "msg-bot";
-            }
-            div.innerText = item.m_content;
-            chatArea.appendChild(div);
-            chatArea.scrollTop = chatArea.scrollHeight;
-        }
-        else if(data.msg_type === "full_chat_history"){
-            renderChatAll(data.data);
-        }
-        else if(data.msg_type === "full_monitor_history"){
-            renderMonitorAll(data.data);
-        }
-    };
-    ws.onclose = ()=>{
-        logPanel.innerText += "❌连接断开，3秒后尝试重连\n";
-        setTimeout(connectWs,3000);
-    }
-}
-
-connectWs();
-
-// 发送按钮
-document.getElementById("btnSend").onclick = ()=>{
-    const val = chatInput.value.trim();
-    if(!val || !ws) return;
-    const div = document.createElement("div");
-    div.className = "msg-user";
-    div.innerText = val;
-    chatArea.appendChild(div);
-    chatArea.scrollTop = chatArea.scrollHeight;
-    ws.send(JSON.stringify({"type":"query", "query":val}));
-    chatInput.value = "";
-};
-
-// 文件上传按钮
-document.getElementById("btnUpload").onclick = async ()=>{
-    const file = document.getElementById("fileInput").files[0];
-    if(!file || !sessionId){
-        alert("等待会话初始化完成，选择PDF文件");
-        return;
-    }
-    const fd = new FormData();
-    fd.append("session_id", sessionId);
-    fd.append("file", file);
-    const resp = await fetch("/upload",{method:"POST", body:fd});
-    const res = await resp.json();
-    logPanel.innerText += `📩${res.msg}\n`;
-    logPanel.scrollTop = logPanel.scrollHeight;
-};
-
-// ========== 新增：清除sessionId调试按钮逻辑 ==========
-document.getElementById("btnClearSession").onclick = function(){
-    localStorage.removeItem("agent_session_id");
-    if(ws){
-        ws.close();
-    }
-    location.reload();
-};
 </script>
 </body>
 </html>

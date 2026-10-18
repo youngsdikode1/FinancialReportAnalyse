@@ -39,3 +39,12 @@ class CUserManager:
             return self.m_users[session_id]
 
         return self.CreateNewUser(session_id)
+
+
+    def GetOnlineUserCount(self) -> int:
+        """统计当前至少有一个活跃 WebSocket 连接的用户数"""
+        count = 0
+        for user in self.m_users.values():
+            if user.GetWebSocketGroup().IsOnline():
+                count += 1
+        return count

@@ -3,51 +3,276 @@
 <head>
     <meta charset="UTF-8">
     <title>财报Agent演示</title>
+    <!-- Markdown & 代码高亮 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.2/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/python.min.js"></script>
+    <script>
+        marked.setOptions({
+            gfm: true,
+            breaks: true,
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return code;
+            }
+        });
+        function escapeHtml(str) {
+            return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+        }
+        function renderBotMarkdown(domEl, rawMdText) {
+            domEl.innerHTML = marked.parse(rawMdText);
+            domEl.querySelectorAll("table").forEach(tbl => {
+                if (!tbl.parentElement.classList.contains("table-wrap")) {
+                    const wrap = document.createElement("div");
+                    wrap.className = "table-wrap";
+                    tbl.parentNode.insertBefore(wrap, tbl);
+                    wrap.appendChild(tbl);
+                }
+            });
+        }
+    </script>
     <style>
 *{box-sizing:border-box;font-family:system-ui}
-body{margin:16px;}
-.container{display:flex;gap:16px;max-width:1300px;}
-.left{width:65%;}
-.right{width:35%;display:flex;flex-direction:column;}
-.tab-buttons{display:flex;gap:4px;margin-bottom:10px;}
-.tab-btn{padding:8px 14px;border:1px solid #aaa;background:#eee;cursor:pointer;}
-.tab-btn.active{background:#2266cc;color:white;border-color:#2266cc;}
+
+/* ===== 全局滚动条，进一步淡化滑块 ===== */
+*::-webkit-scrollbar {
+    width:6px;
+    height:6px;
+}
+*::-webkit-scrollbar-button {
+    display:none;
+}
+*::-webkit-scrollbar-track {
+    background:transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background:rgba(209, 213, 219, 0.45);
+    border-radius:3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background:rgba(173, 181, 189, 0.6);
+}
+
+html,body{
+    margin:0;
+    padding:16px;
+    height:100vh;
+    overflow:hidden;
+}
+body{
+    display:flex;
+    flex-direction:column;
+}
+h2{
+    margin:0 0 12px 0;
+    flex-shrink:0;
+}
+/* 全局tab按钮栏，独立一层，左右面板共用 */
+.tab-buttons{
+    display:flex;
+    gap:4px;
+    margin-bottom:12px;
+    flex-shrink:0;
+}
+.tab-btn{
+    padding:7px 16px;
+    border:1px solid rgba(229, 231, 235, 0.6);
+    background:rgba(255, 255, 255, 0.45);
+    color:#6b7280;
+    cursor:pointer;
+    border-radius:999px;
+    font-size:14px;
+    transition:all 0.18s ease;
+}
+.tab-btn:hover{
+    background:rgba(247, 248, 250, 0.8);
+    border-color:rgba(217, 221, 227, 0.7);
+    color:#374151;
+}
+.tab-btn.active{
+    background:rgba(255, 255, 255, 0.6);
+    color:#111827;
+    border-color:rgba(207, 211, 218, 0.75);
+}
+
+/* 容器：左右面板，高度对齐，不再包含tab */
+.container{
+    display:flex;
+    gap:16px;
+    flex:1;
+    min-height:0;
+    width:100%;
+    align-items: stretch;
+}
+.left{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+    min-height:0;
+}
+.right{
+    flex:0 0 280px;
+    display:flex;
+    flex-direction:column;
+    min-width:220px;
+    min-height:0;
+}
+
 .tab-panel{display:none;}
-.tab-panel.active{display:block;}
-#chatArea{height:460px;border:1px solid #ccc;padding:10px;overflow-y:auto;}
-.msg-user{background:#e7f3ff;padding:8px 10px;margin:4px 0;border-radius:6px;}
-.msg-bot{background:#f5f5f5;padding:8px 10px;margin:4px 0;border-radius:6px;}
-#chatInput{width:100%;height:80px;padding:8px;margin-top:8px;}
-.chat-btn-row{display:flex;gap:8px;margin-top:6px;}
+.tab-panel.active{
+    display:flex;
+    flex-direction:column;
+    flex:1;
+    min-height:0;
+}
+
+#chatArea{
+    flex:1;
+    border-radius:12px;
+    border:1px solid #e5e7eb;
+    padding:10px;
+    overflow-y:auto;
+    background:#fff;
+    margin-bottom:8px;
+    min-height:0;
+}
+
+.msg-bot{
+    background:#f7f8fa;
+    padding:14px 16px;
+    margin:6px 0;
+    border-radius:9px;
+    border:1px solid #e5e7eb;
+    line-height:1.65;
+    width:100%;
+}
+.msg-user{
+    background:#eef4ff;
+    padding:12px 14px;
+    margin:6px 0 6px auto;
+    border-radius:9px;
+    max-width:85%;
+    width:fit-content;
+}
+
+.table-wrap{
+    overflow-x:auto;
+    margin:8px 0;
+}
+.msg-bot table{
+    border-collapse:collapse;
+    width:100%;
+    margin:10px 0;
+}
+.msg-bot th,.msg-bot td{
+    border:1px solid #ddd;
+    padding:6px 10px;
+}
+.msg-bot pre{
+    overflow-x:auto;
+    border-radius:6px;
+    margin:8px 0;
+}
+
+/* ========== 仿DeepSeek输入框 ========== */
+.input-wrap{
+    border-radius:24px;
+    border:1px solid #e5e7eb;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    padding:10px 14px;
+    background:#fff;
+    flex-shrink:0;
+    cursor:text;
+}
+#chatInput{
+    width:100%;
+    height:40px;
+    border:none;
+    outline:none;
+    padding:0;
+    font-size:15px;
+    resize:none;
+    overflow:hidden;
+}
+#chatInput::placeholder{
+    color:#9ca3af;
+}
+.input-bottom-bar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:8px;
+}
+#btnSend{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    background:#2b65ec;
+    color:white;
+    border:none;
+    cursor:pointer;
+    font-size:16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+#btnSend:disabled{
+    background:#94b2f0;
+    cursor:not-allowed;
+}
+#btnSend:hover{
+    opacity:0.92;
+}
+
 .upload-box{padding:10px;}
 #fileList{margin-top:12px;}
 .file-item{padding:4px 0;}
 .intro-text{padding:10px;line-height:1.6}
 .debug-box{padding:10px;line-height:1.8;}
-#logPanel{height:540px;border:1px solid #ccc;padding:10px;overflow-y:auto;white-space:pre-wrap;}
+
+/* 右侧状态栏：和左侧聊天框+输入框完全等高 */
+#logPanel{
+    flex:1;
+    border-radius:24px;
+    border:1px solid #e5e7eb;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    padding:10px;
+    overflow-y:auto;
+    white-space:pre-wrap;
+    background:#fff;
+    min-height:0;
+}
     </style>
 </head>
 <body>
-<h2>财报分析Agent演示</h2>
+<h2>财报Agent演示</h2>
+<!-- Tab按钮栏，独立抽出来，不再放在left里面 -->
+<div class="tab-buttons">
+    <button class="tab-btn active" data-tab="tab-chat">聊天界面</button>
+    <button class="tab-btn" data-tab="tab-intro">产品介绍</button>
+    <button class="tab-btn" data-tab="tab-upload">财报上传</button>
+    <button class="tab-btn" data-tab="tab-debug">调试</button>
+</div>
+<!-- container：左右两栏【聊天面板】和【状态栏】，高度一对一匹配 -->
 <div class="container">
     <div class="left">
-        <div class="tab-buttons">
-            <button class="tab-btn active" data-tab="tab-chat">聊天界面</button>
-            <button class="tab-btn" data-tab="tab-intro">产品介绍</button>
-            <button class="tab-btn" data-tab="tab-upload">文件上传</button>
-            <!-- 新增调试tab按钮 -->
-            <button class="tab-btn" data-tab="tab-debug">调试</button>
-        </div>
         <div id="tab-chat" class="tab-panel active">
             <div id="chatArea"></div>
-            <textarea id="chatInput" placeholder="输入你的问题"></textarea>
-            <div class="chat-btn-row">
-                <button id="btnSend">发送消息</button>
+            <div class="input-wrap" id="inputWrap">
+                <textarea id="chatInput" placeholder="输入你的问题"></textarea>
+                <div class="input-bottom-bar">
+                    <div></div>
+                    <button id="btnSend">↑</button>
+                </div>
             </div>
         </div>
         <div id="tab-intro" class="tab-panel">
             <div class="intro-text">
-                <h3>财报智能分析Agent</h3>
+                <h3>财报Agent演示</h3>
                 <p>架构：FastAPI + WebSocket + User会话层</p>
                 <p>刷新页面自动加载历史会话消息。</p>
             </div>
@@ -59,7 +284,6 @@ body{margin:16px;}
                 <div id="fileList"><b>上传状态查看：右侧状态栏查看后台任务进度</b></div>
             </div>
         </div>
-        <!-- 新增调试面板 -->
         <div id="tab-debug" class="tab-panel">
             <div class="debug-box">
                 <h4>调试工具</h4>
@@ -70,7 +294,6 @@ body{margin:16px;}
         </div>
     </div>
     <div class="right">
-        <h4>🔍Agent实时进度状态栏</h4>
         <div id="logPanel"></div>
     </div>
 </div>
@@ -78,14 +301,21 @@ body{margin:16px;}
 let ws = null;
 let sessionId = null;
 let currentBotDiv = null;
+let currentBotRawText = "";
 const chatArea = document.getElementById("chatArea");
 const logPanel = document.getElementById("logPanel");
 const chatInput = document.getElementById("chatInput");
+const inputWrap = document.getElementById("inputWrap");
 const tabBtns = document.querySelectorAll(".tab-btn");
 const panels = document.querySelectorAll(".tab-panel");
 const showLocalSid = document.getElementById("showLocalSid");
 
-// tab切换
+inputWrap.onclick = function(e){
+    if(e.target.id !== "btnSend"){
+        chatInput.focus();
+    }
+};
+
 tabBtns.forEach(btn=>{
     btn.onclick = ()=>{
         const targetTab = btn.dataset.tab;
@@ -93,7 +323,6 @@ tabBtns.forEach(btn=>{
         panels.forEach(p=>p.classList.remove("active"));
         btn.classList.add("active");
         document.getElementById(targetTab).classList.add("active");
-        // 切换到调试tab时，刷新显示当前本地sid
         if(targetTab === "tab-debug"){
             showLocalSid.innerText = localStorage.getItem("agent_session_id") || "无(未存储)";
         }
@@ -105,15 +334,17 @@ function renderChatAll(list){
         return;
     }
     currentBotDiv = null;
+    currentBotRawText = "";
     chatArea.innerHTML = "";
     list.forEach(item=>{
         const div = document.createElement("div");
         if(item.m_type === "TYPE_CHAT_USER"){
             div.className = "msg-user";
+            div.innerText = escapeHtml(item.m_content);
         }else if(item.m_type === "TYPE_CHAT_BOT"){
             div.className = "msg-bot";
+            renderBotMarkdown(div, item.m_content);
         }
-        div.innerText = item.m_content;
         chatArea.appendChild(div);
     })
     chatArea.scrollTop = chatArea.scrollHeight;
@@ -157,14 +388,19 @@ function connectWs(){
                 currentBotDiv = document.createElement("div");
                 currentBotDiv.className = "msg-bot";
                 chatArea.appendChild(currentBotDiv);
+                currentBotRawText = "";
             }
-            currentBotDiv.innerText += data.text;
+            currentBotRawText += data.text;
+            currentBotDiv.innerText = currentBotRawText;
             chatArea.scrollTop = chatArea.scrollHeight;
         }
         else if(data.type === "chat_end"){
+            if(currentBotDiv){
+                renderBotMarkdown(currentBotDiv, currentBotRawText);
+            }
             currentBotDiv = null;
+            currentBotRawText = "";
         }
-        // 单条追加消息（跨tab同步）
         else if(data.msg_type === "append_msg"){
             const item = data.item;
             if(item.m_type === "TYPE_CHAT_MONITOR"){
@@ -175,10 +411,11 @@ function connectWs(){
             const div = document.createElement("div");
             if(item.m_type === "TYPE_CHAT_USER"){
                 div.className = "msg-user";
+                div.innerText = escapeHtml(item.m_content);
             }else if(item.m_type === "TYPE_CHAT_BOT"){
                 div.className = "msg-bot";
+                renderBotMarkdown(div, item.m_content);
             }
-            div.innerText = item.m_content;
             chatArea.appendChild(div);
             chatArea.scrollTop = chatArea.scrollHeight;
         }
@@ -194,23 +431,27 @@ function connectWs(){
         setTimeout(connectWs,3000);
     }
 }
-
 connectWs();
 
-// 发送按钮
 document.getElementById("btnSend").onclick = ()=>{
     const val = chatInput.value.trim();
     if(!val || !ws) return;
     const div = document.createElement("div");
     div.className = "msg-user";
-    div.innerText = val;
+    div.innerText = escapeHtml(val);
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
     ws.send(JSON.stringify({"type":"query", "query":val}));
     chatInput.value = "";
 };
 
-// 文件上传按钮
+chatInput.onkeydown = function(e){
+    if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        document.getElementById("btnSend").click();
+    }
+}
+
 document.getElementById("btnUpload").onclick = async ()=>{
     const file = document.getElementById("fileInput").files[0];
     if(!file || !sessionId){
@@ -226,7 +467,6 @@ document.getElementById("btnUpload").onclick = async ()=>{
     logPanel.scrollTop = logPanel.scrollHeight;
 };
 
-// ========== 新增：清除sessionId调试按钮逻辑 ==========
 document.getElementById("btnClearSession").onclick = function(){
     localStorage.removeItem("agent_session_id");
     if(ws){

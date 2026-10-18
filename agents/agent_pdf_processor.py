@@ -11,6 +11,7 @@ from companys.company_manager import CCompanyManager
 from companys.company import CCompany
 import time
 import os
+from events.event_manager import PostWorkFlowMessage
 
 # ---------------- 内存临时对象 CPDFPage 只内存，不落地 ----------------
 class CPDFPage:
@@ -51,6 +52,8 @@ class CPdfProcessorState(TypedDict):
     # 全局输出
     full_report_summary: Optional[str]
     akshare_style_text: Optional[str]
+
+
     # 拼接完整raw文本
     raw_full_text: Optional[str]
     # ========= RAG入库状态新增 =========
@@ -65,6 +68,10 @@ class CPdfProcessorState(TypedDict):
 class CAgentPDFProcessor:
     def __init__(self):
         self.m_graph = self._build_graph()
+        # 新增成员：保存解析得到的财报名
+        # 保存解析输出的财报实体对象，对外可访问
+        self.m_report: Optional[CFinancialReport] = None
+        self.m_session_id = ""
 
     def _build_graph(self):
         gb = StateGraph(CPdfProcessorState)
@@ -119,6 +126,9 @@ class CAgentPDFProcessor:
 
     def _node_parse_pdf(self, state: CPdfProcessorState) -> CPdfProcessorState:
         pdf_p = Path(state["pdf_path"])
+        session_id = self.m_session_id
+        PostWorkFlowMessage(session_id, f"📄开始解析PDF文件")
+
         page_list: List[CPDFPage] = []
         page_list.append(CPDFPage(page_num=0, content=""))
         try:
@@ -132,6 +142,7 @@ class CAgentPDFProcessor:
                     if count % 10 == 0:
                         PrintLog(f"[CAgentPDFProcessor] PDF 已处理页数 {count}")
             LogInfo(f"[CAgentPDFProcessor] PDF解析完成，总页数 {total}")
+            PostWorkFlowMessage(session_id, f"✅PDF文件解析完成，总页数：{total}")
             return {
                 **state,
                 "page_list": page_list,
@@ -139,6 +150,7 @@ class CAgentPDFProcessor:
             }
         except Exception as e:
             LogInfo(f"[CAgentPDFProcessor] pdf解析异常 {e}")
+            PostWorkFlowMessage(session_id, f"❌PDF解析失败：{str(e)}")
             return {**state, "success": False, "fail_msg": f"pdf解析失败:{str(e)}"}
 
     def FetchWholeReportSummary(self, full_report_text: str) -> ReportSimpleOut:
@@ -294,6 +306,8 @@ N = PDF物理页码。
         rep.m_summary = state["full_report_summary"]
         rep.Save()
         comp.m_report_manager.AddReport(rep)
+        self.m_report = rep
+
         LogInfo(f"[CAgentPDFProcessor] _node_build_report_entity 实体构建并保存完成 {rep.GetReportName()}")
         return state
 
@@ -319,13 +333,19 @@ N = PDF物理页码。
                 "rag_ingest_err_msg": err_msg
             }
         try:
+            PostWorkFlowMessage(self.m_session_id, f"💾PDF文件内容入库中")
+
             ok = rep.RAGImportRawText()
             LogInfo(f"_node_do_rag_ingest finish ok={ok}, collection={rep.GetCollectionName()}")
+            PostWorkFlowMessage(self.m_session_id, f"✅PDF文件内容入库完成")
+
             return {
                 **state,
                 "rag_ingest_ok": ok,
                 "rag_ingest_err_msg": None
             }
+
+
         except Exception as e:
             err_msg = f"_node_do_rag_ingest RAG入库异常:{str(e)}"
             LogInfo(err_msg)
@@ -342,8 +362,10 @@ N = PDF物理页码。
         return state
 
     def Run(self, pdf_file_path: str, force_overwrite: bool = False, dump_batch_summary: bool = False):
+
+
         init_state: CPdfProcessorState = {
-            "pdf_path": pdf_file_path,
+            "pdf_path": pdf_file_path,      
             "force_overwrite": force_overwrite,
             "dump_batch_summary": dump_batch_summary,
             "page_list": None,
@@ -369,14 +391,22 @@ N = PDF物理页码。
         }
         LogInfo("CAgentPDFProcessor.Run")
         final_state = self.m_graph.invoke(init_state)
+        report_name = self.m_report.GetReportName() if self.m_report is not None else ""
+
         return {
             "success": final_state["success"],
             "is_skip": final_state.get("is_skip", False),
             "fail_msg": final_state.get("fail_msg"),
             "report_dir": final_state.get("report_dir"),
             "rag_ingest_ok": final_state.get("rag_ingest_ok"),
-            "rag_ingest_err_msg": final_state.get("rag_ingest_err_msg")
+            "rag_ingest_err_msg": final_state.get("rag_ingest_err_msg"),
+            "report_name": report_name,
+
         }
+
+
+
+
 
 # ------------------- 简单本地测试demo ----------------
 def TestRun():

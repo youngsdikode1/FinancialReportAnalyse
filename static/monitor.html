@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统监控面板</title>
+    <link rel="stylesheet" href="./style.css">
+    <style>
+        body {
+            padding: 16px;
+        }
+        .monitor-wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .pre-box {
+            margin-top:12px;
+            background-color:#f7f8fa;
+            padding:16px;
+            border-radius:8px;
+            min-height:400px;
+            font-family:Consolas,monospace;
+            white-space:pre-wrap;
+        }
+    </style>
+</head>
+<body>
+<div class="monitor-wrap">
+    <h2>系统监控面板</h2>
+    <div class="tab-buttons">
+        <button class="tab-btn active" data-key="user_info">用户信息</button>
+        <button class="tab-btn" data-key="rag_info">RAG</button>
+        <button class="tab-btn" data-key="hardware_info">硬件状态</button>
+    </div>
+    <pre id="monitorPre" class="pre-box"></pre>
+</div>
+
+<script>
+let cacheData = {
+    user_info: "",
+    rag_info: "",
+    hardware_info: ""
+};
+let activeKey = "user_info";
+const preDom = document.getElementById("monitorPre");
+
+// 加载数据
+async function loadMonitorData(){
+    try{
+        const resp = await fetch("/api/monitor_info");
+        if(!resp.ok){
+            preDom.textContent = "请求监控接口失败，http状态码：" + resp.status;
+            return;
+        }
+        const json = await resp.json();
+        cacheData.user_info = json.user_info;
+        cacheData.rag_info = json.rag_info;
+        cacheData.hardware_info = json.hardware_info;
+        renderCurrentTab();
+    }catch(err){
+        preDom.textContent = "网络异常，获取监控数据失败：" + err.message;
+    }
+}
+
+// 渲染当前激活tab内容
+function renderCurrentTab(){
+    preDom.textContent = cacheData[activeKey];
+}
+
+// tab点击事件
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+        document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+        btn.classList.add("active");
+        activeKey = btn.dataset.key;
+        renderCurrentTab();
+    })
+})
+
+// 页面初始化加载
+document.addEventListener("DOMContentLoaded",()=>{
+    loadMonitorData();
+})
+</script>
+</body>
+</html>

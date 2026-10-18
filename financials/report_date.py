@@ -106,6 +106,30 @@ class CReportDate:
         return res
 
 
+    @staticmethod
+    def IsYearRangeTooOld(year_range: str, max_years: int) -> bool:
+        """
+        判断 year_range 的起始报告期是否早于“当前时间往前推 max_years 年”。
+        用于限制用户查询过于久远的财报。
+        :param year_range: 时间范围字符串，如 "2019.1月-2022.12月"
+        :param max_years: 允许的最大回溯年数，必须 >= 0；
+                        max_years=3 表示允许 当前年 及之前 3 年，共 4 个自然年
+        :return: True=太旧需要限制；False=在允许窗口内（或解析不出时间，放行）
+        """
+        if max_years < 0:
+            return False
+
+        rds = CReportDate.ConvertReportDate(year_range)
+        if len(rds) == 0:
+            # 解析不出报告期，不在此函数做限制，交后续流程处理
+            return False
+
+        earliest_year = min(rd.m_year for rd in rds)
+        cur_year = date.today().year
+        min_allowed_year = cur_year - max_years
+        return earliest_year < min_allowed_year
+
+
 def TestConvert():
     print("==== TestConvertReportDate 测试用例 ====")
     print(f"系统实时当前年份:{date.today().year}")

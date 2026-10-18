@@ -5,6 +5,9 @@ import time
 from utils.config import CConfigManager
 from pathlib import Path
 import json
+from typing import List
+from financials.report_date import CReportDate, TYPE_ANNUAL, TYPE_HALF
+from datetime import date
 
 class CCompanyManager:
     """
@@ -112,6 +115,67 @@ class CCompanyManager:
         return company
 
 
+
+    def FilterCompanyByReportYears(self, need_years: int) -> List[CCompany]:
+        """
+        遍历内存全部已加载公司，筛选【连续need_years年财报齐全】的公司列表
+        规则：
+        1. 已过去的年份：只认年报TYPE_ANNUAL，中报不算
+        2. 当前自然年：只有系统月份>9月才纳入检查；此时允许年报/中报任意一个存在
+        3. 检查列表内的所有年份必须全部满足条件，缺任意一年直接过滤该公司
+        :param need_years: 需要的年数，必须>=1
+        :return: List[CCompany] 符合条件的公司
+        """
+        if need_years < 1:
+            LogInfo(f"FilterCompanyByReportYears need_years={need_years} 参数非法，返回空列表")
+            return []
+
+        today = date.today()
+        cur_year = today.year
+        cur_month = today.month
+
+        check_year_list: List[int] = []
+        if cur_month > 9:
+            # 大于9月，包含本年；向前倒推 need_years‑1 个往年
+            for offset in range(need_years):
+                y = cur_year - (need_years - 1) + offset
+                check_year_list.append(y)
+        else:
+            # ≤9月，不包含本年；从去年开始取need_years个完整往年
+            for offset in range(need_years):
+                y = cur_year - need_years + 1 + offset
+                check_year_list.append(y)
+
+        LogInfo(f"FilterCompanyByReportYears need_years={need_years}, cur_year={cur_year},cur_month={cur_month}, check_year_list={check_year_list}")
+
+        result: List[CCompany] = []
+        # 遍历内存全部公司
+        for comp in self.m_companys.values():
+            rep_mgr = comp.GetReportManager()
+            all_ok = True
+            for y in check_year_list:
+                rd_annual = CReportDate(TYPE_ANNUAL, year=y, quarter=0)
+                has_annual = rep_mgr.GetReport(rd_annual) is not None
+
+                if y != cur_year:
+                    # 历史年份：必须有年报
+                    if not has_annual:
+                        all_ok = False
+                        break
+                else:
+                    # y == cur_year，只有cur_month>9才会走到这里
+                    rd_half = CReportDate(TYPE_HALF, year=y, quarter=0)
+                    has_half = rep_mgr.GetReport(rd_half) is not None
+                    if not (has_annual or has_half):
+                        all_ok = False
+                        break
+            if all_ok:
+                result.append(comp)
+        LogInfo(f"FilterCompanyByReportYears 筛选完成，符合条件公司数量:{len(result)}")
+        return result
+
+
+
 def TestCreate():
     PrintLog("TestCreate")
     comp_mgr = CCompanyManager.GetInstance()
@@ -139,9 +203,13 @@ def TestLoadAll():
     LogInfo("TestLoadAll")
     CCompanyManager.GetInstance()
 
+def TestFilterCompany():
+    mgr = CCompanyManager.GetInstance()
+    comp_list = mgr.FilterCompanyByReportYears(need_years=3)
+    PrintLog(f"\n===== 筛选满足最近3年财报的公司，共{len(comp_list)}家 =====")
+    for c in comp_list:
+        PrintLog(f" - {c.GetNameCode()}")
 
 if __name__ == "__main__":
-    TestLoad()
-
-
+    TestFilterCompany()
     time.sleep(0.3)        

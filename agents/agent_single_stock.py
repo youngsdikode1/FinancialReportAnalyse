@@ -8,13 +8,30 @@ from typing import List, TypedDict, Optional
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph
 
+from agents.agent_fetch_report import CAgentFetchReport
 from companys.company_manager import CCompanyManager
 from companys.company import CCompany
 from financials.report_date import CReportDate
-from financials.fetch_report import CDSFetchReports
+
 from utils.logs import LogInfo
 from events.event import CSubScribeObj, CEventMessage, CEventType
 from events.event_manager import CEventManager
+from utils.config import CConfigManager
+from agents.agent_fetch_report import DOWN_ERR_DS_DOWN_FAILED
+
+
+PDF_DOWN_HINTS = """
+PDF财报下载方式
+
+1.巨潮网 
+https://www.cninfo.com.cn/new/fulltextSearch?notautosubmit=&keyWord={stock_name}
+复制打开以上链接，点击对应的财报发布公告，点开后看到PDF页面后，浏览器右键另存为到本地
+
+2.东方财富网
+https://data.eastmoney.com/notices/stock/{stock_code}.html
+复制打开以上链接，点击对应的财报发布公告，进入网页后，点击 [查看PDF原文] ，点开后看到PDF页面后，浏览器右键另存为到本地
+"""
+
 
 class CSingleStockRequest(BaseModel):
     """单只股票数据收集子任务请求实体"""
@@ -63,6 +80,22 @@ class CAgentSingleStock:
         graph_builder.set_entry_point("LoadLocalReportNode")
         return graph_builder.compile()
 
+    def __MakeErrHints(self, agent_fetch_report, company):
+        stock_name = company.GetName()
+
+        date_list = agent_fetch_report.m_err_report_dates or []
+        if len(date_list) > 0:
+            date_names = [rd.GetName() for rd in date_list]
+            fail_text = f"{stock_name}股票的[{','.join(date_names)}]报告下载失败，建议通过手动上传页面把报告上传系统\n"
+        else:
+            # 没有拿到具体失败报告期兜底文案
+            fail_text = f"{stock_name}股票部分报告下载失败，建议通过手动上传页面把报告上传系统\n"       
+
+        fail_text += "可以将pdf版本的财报下载到本地，然后通过本网页顶部的 [财报上传] 按钮，打开页面进行上传。\n"
+        fail_text += PDF_DOWN_HINTS.format(stock_name=stock_name, stock_code=company.GetStockCode())
+
+        return fail_text
+
     def LoadLocalReportNode(self, state: CSingleStockState) -> CSingleStockState:
         stock_code = state["stock_code"]
         year_range = state["year_range"]
@@ -97,14 +130,35 @@ class CAgentSingleStock:
         evt_mgr.Publish(event_msg)
 
 
-        obj = CDSFetchReports()
-        obj.m_session_id = self.m_session_id
+
+        obj = CAgentFetchReport(self.m_session_id)
         obj.m_stock_code = stock_code
         obj.m_year_range = year_range
-        obj.Start()
+        obj.Start()           
+
+        if obj.m_task_err_code != 0:
+            stock_name = company.GetName()
+            fail_text = obj.m_task_err_desc
+
+            # 仅处理DS下载失败场景，构造业务友好提示
+            if obj.m_task_err_code == DOWN_ERR_DS_DOWN_FAILED:
+
+                fail_text = self.__MakeErrHints(obj, company)    
+
+            LogInfo(f"LoadLocalReportNode 财报下载前置错误：{fail_text}")
+            res = CStockGetData(
+                m_success=False,
+                m_failed_reason=fail_text,
+                m_base_info="",
+                m_RAG_info="",
+                m_company_name=stock_name
+            )
+            return {**state, "raw_result": res}
+
 
         rd_list = CReportDate.ConvertReportDate(year_range)
         report_mgr = company.m_report_manager
+
 
         base_info_string = ""
         rag_info_string = ""
@@ -113,7 +167,12 @@ class CAgentSingleStock:
             if rep is not None:
                 base_info_string += rep.GetBaseInfo()    
                 rag_info_string += rep.RAGRetrieves(rag_key_list).GetLLMContent()
-            
+
+        use_summary_only = CConfigManager.GetInstance().GetValue("use_summary_only")
+        if use_summary_only:
+            hints = "本次分析仅使用摘要，不使用RAG !!!!!!!!!!!!!!!!!!"
+            LogInfo(hints)
+            rag_info_string = hints
 
         res = CStockGetData(
             m_success=True,
@@ -124,6 +183,7 @@ class CAgentSingleStock:
         )
  
         return {**state, "raw_result": res}
+
 
     def Run(self, req: CSingleStockRequest) -> CStockGetData:
         init_state: CSingleStockState = {

@@ -27,3 +27,6 @@ config.json
 
 # 临时备份
 *_old.py
+
+
+*:Zone.Identifier

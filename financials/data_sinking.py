@@ -6,13 +6,18 @@ from datetime import datetime
 from typing import Dict, Optional, List
 from financials.report_date import CReportDate, TYPE_ANNUAL, TYPE_HALF, TYPE_QUARTER
 from utils.config import CConfigManager
-from utils.logs import LogInfo, LogStack
+from utils.logs import LogInfo, LogStack, LogFatal
 
-# ===================== 配置 =====================
-# 注意：正式部署请移到 config.json 通过 CConfigManager 读取，不要硬编码提交git
-DS_KEY = "N5IbZD4yzyXCNxexbLAJPSoIZ2STDkW4"
 MAX_RETRY = 2  # 单period http请求最大重试次数
 RETRY_SLEEP_SEC = 1.0
+
+
+class CDSDownloadResult:
+    """下载结果包装对象，手写__init__，无dataclass"""
+    def __init__(self):
+        self.m_download_success: bool = False
+        self.m_err_desc: str = ""
+        self.m_reports: Optional[Dict[CReportDate, "CDSFile"]] = None
 
 
 def to_datasink_symbol(stock_code: str) -> str:
@@ -27,24 +32,47 @@ def to_datasink_symbol(stock_code: str) -> str:
         return f"{stock_code}.SZ"
 
 
-def _gen_report_date_range(startdate: str, enddate: str) -> List[CReportDate]:
+def _gen_report_date_range(startdate: str, enddate: str, full_reports: bool = False) -> List[CReportDate]:
     """
     根据 startdate "2020-12-31", enddate "2021-12-31"
-    生成区间内所有合法报告：年报、中报、一季报、三季报
+    :param full_reports: False=默认；True 返回全部：年报、中报、一季报、三季报
+        full_reports=False规则：
+            1. 区间内完整过去年份：仅年报
+            2. end年份处理：
+                - end年份不是本年：仅年报
+                - end是本年，并且当前月份>8月：年报 + 中报
+                - end是本年，当前月份≤8月：仅年报，中报尚未披露不生成
+            3. 不返回一季报、三季报
     """
     res: List[CReportDate] = []
     fmt = "%Y-%m-%d"
     dt_start = datetime.strptime(startdate, fmt)
     dt_end = datetime.strptime(enddate, fmt)
-
     y_begin = dt_start.year
     y_end = dt_end.year
 
-    for year in range(y_begin, y_end + 1):
-        res.append(CReportDate(TYPE_ANNUAL, year, quarter=0))
-        res.append(CReportDate(TYPE_HALF, year, quarter=0))
-        res.append(CReportDate(TYPE_QUARTER, year, quarter=1))
-        res.append(CReportDate(TYPE_QUARTER, year, quarter=3))
+    now = datetime.now()
+    cur_year = now.year
+    cur_month = now.month
+
+    if full_reports:
+        # 原有逻辑：全部报告类型
+        for year in range(y_begin, y_end + 1):
+            res.append(CReportDate(TYPE_ANNUAL, year, quarter=0))
+            res.append(CReportDate(TYPE_HALF, year, quarter=0))
+            res.append(CReportDate(TYPE_QUARTER, year, quarter=1))
+            res.append(CReportDate(TYPE_QUARTER, year, quarter=3))
+    else:
+        # full_reports=False：默认模式
+        for year in range(y_begin, y_end):
+            # 非end的完整过去年份：只加年报
+            res.append(CReportDate(TYPE_ANNUAL, year, quarter=0))
+
+        # end年份
+        res.append(CReportDate(TYPE_ANNUAL, y_end, quarter=0))
+        # 只有end等于当前年，并且月份>8，才追加中报
+        if y_end == cur_year and cur_month > 8:
+            res.append(CReportDate(TYPE_HALF, y_end, quarter=0))
     return res
 
 
@@ -71,10 +99,8 @@ class CDSFile:
         base_reports_dir = cfg.GetReportBaseDir(self.m_stock_code)
         report_dir = os.path.join(base_reports_dir, self.m_report_date.GetKey())
         os.makedirs(report_dir, exist_ok=True)
-
         json_path = os.path.join(report_dir, "ds_base_info.json")
         md_path = os.path.join(report_dir, "ds_content.md")
-
         base_info = {
             "m_stock_code": self.m_stock_code,
             "m_stock_name": self.m_stock_name,
@@ -104,7 +130,6 @@ class CDSFile:
         except Exception as e:
             LogStack(e, f"CDSFile.Load read file fail dir={report_dir}")
             return None
-
         try:
             rd_key = base_info["report_date_key"]
             parts = rd_key.split("-")
@@ -115,7 +140,6 @@ class CDSFile:
         except Exception as e:
             LogStack(e, f"CDSFile.Load parse report_date_key fail key={base_info.get('report_date_key')}")
             return None
-
         obj = cls()
         obj.m_stock_code = base_info["m_stock_code"]
         obj.m_stock_name = base_info["m_stock_name"]
@@ -172,23 +196,28 @@ def _map_doc_type_to_c_report_date(doc_type: str, report_period: str) -> Optiona
         return None
 
 
-def DownLoadDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CReportDate, CDSFile]:
+def DownLoadDSFiles(stock_code: str, startdate: str, enddate: str) -> CDSDownloadResult:
     """
     使用requests直接http调用datasink.ing接口；逐个report_period请求
     :param stock_code: 内部6位股票代码，如"002069"
     :param startdate: "2020-01-01"
     :param enddate: "2024-12-31"
-    :return: Dict[CReportDate, CDSFile]
+    :return: CDSDownloadResult 下载结果包装对象
     """
+    ret = CDSDownloadResult()
     result_dict: Dict[CReportDate, CDSFile] = dict()
     ds_symbol = to_datasink_symbol(stock_code)
     expect_rds = _gen_report_date_range(startdate, enddate)
-    LogInfo(f"DownLoadDSFiles start stock={stock_code}, symbol={ds_symbol}, time_range={startdate} ~ {enddate}")
+    LogInfo(f"DownLoadDSFiles start stock={stock_code}, symbol={ds_symbol}, time_range={startdate} ~ {enddate} datas:{expect_rds}")
+    ds_key = CConfigManager.GetInstance().GetDatasinkingKey()
+
+    any_fatal_err = False
+    fatal_err_msg = ""
 
     for rd in expect_rds:
         period_str = _c_report_date_to_period_str(rd)
         url = (f"https://api.datasink.ing/documents?"
-               f"symbol={ds_symbol}&report_period={period_str}&with_content=1&apikey={DS_KEY}")
+               f"symbol={ds_symbol}&report_period={period_str}&with_content=1&apikey={ds_key}")
         resp_json = None
         ok = False
         for retry in range(0, MAX_RETRY + 1):
@@ -202,17 +231,27 @@ def DownLoadDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CRepo
             except Exception as e:
                 LogStack(e, f"DownLoadDSFiles http fail stock={stock_code}, period={period_str}, retry={retry}")
                 if retry >= MAX_RETRY:
-                    LogInfo(f"DownLoadDSFiles stock={stock_code} 该period达到最大重试，跳过 period={period_str}")
+                    any_fatal_err = True
+                    fatal_err_msg = f"period={period_str} 达到最大重试次数，下载失败"
+                    LogFatal(f"DownLoadDSFiles stock={stock_code} {fatal_err_msg}")
                 time.sleep(RETRY_SLEEP_SEC)
+        if any_fatal_err:
+            break
         if not ok or resp_json is None:
             continue
+
+        # 识别datasinking业务错误，例如配额超限 free_quota_key
+        if "detail" in resp_json:
+            any_fatal_err = True
+            fatal_err_msg = resp_json["detail"]
+            LogFatal(f"DownLoadDSFiles detect api business error: {fatal_err_msg}")
+            break
 
         item_list = resp_json.get("items", [])
         total_cnt = resp_json.get("total", 0)
         if total_cnt == 0 or len(item_list) == 0:
-            LogInfo(f"DownLoadDSFiles stock={stock_code}, period={period_str} 接口total=0，本周期无财报，跳过")
+            LogFatal(f"DownLoadDSFiles stock={stock_code}, period={period_str} 接口total=0，本周期无财报，跳过")
             continue
-
         item = item_list[0]
         doc_type = item.get("doc_type", "")
         report_period = item.get("report_period", "")
@@ -234,25 +273,33 @@ def DownLoadDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CRepo
         except Exception as e:
             LogStack(e, f"DownLoadDSFiles stock={stock_code} single report save skip title={item.get('title','')}")
             continue
-    LogInfo(f"DownLoadDSFiles stock={stock_code} finish, total ok count={len(result_dict)}")
-    return result_dict
+
+    if any_fatal_err:
+        ret.m_download_success = False
+        ret.m_err_desc = fatal_err_msg
+        ret.m_reports = None
+    else:
+        ret.m_download_success = True
+        ret.m_err_desc = ""
+        ret.m_reports = result_dict
+        LogInfo(f"DownLoadDSFiles stock={stock_code} finish, total ok count={len(result_dict)}")
+    return ret
 
 
-def FetchDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CReportDate, CDSFile]:
+def FetchDSFiles(stock_code: str, startdate: str, enddate: str) -> CDSDownloadResult:
     """
     上层主要入口
     1. 生成区间全部预期CReportDate列表
     2. 优先 LoadDSFile 读取本地缓存
     3. 如果存在本地缺失报告，取缺失报告的最小/最大年份，缩小下载窗口调用DownLoadDSFiles
-    4. 合并【本地已存在 + 刚下载】返回结果字典
+    4. 合并【本地已存在 + 刚下载】返回结果字典，包装进CDSDownloadResult
     :param stock_code: 内部6位股票代码
     :param startdate: "2020-12-31"
     :param enddate: "2021-12-31"
-    :return: Dict[CReportDate, CDSFile]
+    :return: CDSDownloadResult
     """
     result: Dict[CReportDate, CDSFile] = dict()
     expect_rds = _gen_report_date_range(startdate, enddate)
-
     missing_rds: List[CReportDate] = []
     # 第一步：全部优先读本地磁盘
     for rd in expect_rds:
@@ -265,7 +312,11 @@ def FetchDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CReportD
     LogInfo(f"FetchDSFiles stock={stock_code}, local hit:{len(result)}, missing count:{len(missing_rds)}")
     # 没有缺失，直接返回本地结果，不走网络
     if len(missing_rds) == 0:
-        return result
+        ret = CDSDownloadResult()
+        ret.m_download_success = True
+        ret.m_err_desc = ""
+        ret.m_reports = result
+        return ret
 
     # 从缺失报告集合提取最小、最大年份，缩小下载时间窗口
     missing_years = [rd.m_year for rd in missing_rds]
@@ -275,34 +326,34 @@ def FetchDSFiles(stock_code: str, startdate: str, enddate: str) -> Dict[CReportD
     dl_end = f"{max_year}-12-31"
     LogInfo(f"FetchDSFiles stock={stock_code}, 缺失报告年份范围 [{min_year} ~ {max_year}]，实际下载窗口 {dl_start} ~ {dl_end}")
 
-    downloaded_dict = DownLoadDSFiles(stock_code, dl_start, dl_end)
+    dl_result = DownLoadDSFiles(stock_code, dl_start, dl_end)
+    if not dl_result.m_download_success:
+        # 下载环节出错，直接透传错误对象
+        return dl_result
+
+    downloaded_dict = dl_result.m_reports
     # 下载回来的数据合并进结果字典，下载到的会覆盖同key
     for rd, cds_file in downloaded_dict.items():
         result[rd] = cds_file
 
-    return result
+    final_ret = CDSDownloadResult()
+    final_ret.m_download_success = True
+    final_ret.m_err_desc = ""
+    final_ret.m_reports = result
+    return final_ret
 
 
 if __name__ == "__main__":
-
     LogInfo("===== data_sinking.py 测试用例开始 =====")
-    test_stock = "002069"
-    test_stock = "600519"
-    s_date = "2020-12-31"
+    test_stock = "300750"
+    s_date = "2024-1-1"
     e_date = "2024-12-31"
-    cds_dict = FetchDSFiles(test_stock, s_date, e_date)
-    LogInfo(f"测试 FetchDSFiles stock={test_stock} 返回报告数量: {len(cds_dict)}")
-    for rd, cds_file in cds_dict.items():
-        LogInfo(f"  key={rd.GetKey()}, title={cds_file.m_title}, content_len={len(cds_file.m_content)}")
-        # ============上层业务示例，演示如何给到CFinancialReport复用============
-        # from financials.financial_report import CFinancialReport
-        # rep = CFinancialReport(
-        #     stock_code=cds_file.m_stock_code,
-        #     company_name=cds_file.m_stock_name,
-        #     report_date=cds_file.m_report_date
-        # )
-        # rep.m_raw_pdf_text = cds_file.m_content
-        # rep.Save()
-        # ok = rep.RAGImportRawText()
-        # LogInfo(f"demo import rag ok={ok}")
+    cds_ret = FetchDSFiles(test_stock, s_date, e_date)
+    if cds_ret.m_download_success and cds_ret.m_reports is not None:
+        cds_dict = cds_ret.m_reports
+        LogInfo(f"测试 FetchDSFiles stock={test_stock} 返回报告数量: {len(cds_dict)}")
+        for rd, cds_file in cds_dict.items():
+            LogInfo(f"  key={rd.GetKey()}, title={cds_file.m_title}, content_len={len(cds_file.m_content)}")
+    else:
+        LogInfo(f"测试 FetchDSFiles 失败: {cds_ret.m_err_desc}")
     LogInfo("===== data_sinking.py 测试用例结束 =====")

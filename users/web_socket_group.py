@@ -54,3 +54,7 @@ class CWebSocketGroup:
         msg_proto.SetObj(web_socket)
         evt_mgr = CEventManager.GetInstance()
         evt_mgr.Publish(msg_proto)
+
+    def IsOnline(self) -> bool:
+        """有任意活跃 WebSocket 连接即视为在线"""
+        return len(self.m_sockets) > 0        
