@@ -24,6 +24,7 @@
 - **沉浸式任务反馈**：WebSocket 实时推送执行进度，右侧状态栏与耗时预估消除等待焦虑。
 
 👉 **[📚 产品需求与技术设计文档]([https://my.feishu.cn/wiki/KdDGw64CyioM71kEuZNcK1qTnmg])**
+https://my.feishu.cn/wiki/KdDGw64CyioM71kEuZNcK1qTnmg?from=from_copylink
 
 ---
 
